@@ -1,0 +1,24 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python virtual environments & bytecode
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.pytest_cache/
+
+# Node / Frontend artifacts
+node_modules/
+dist/
+build/
+.wrangler/
+
+# Logs and scratch
+*.log
+scratch/

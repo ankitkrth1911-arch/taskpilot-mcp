@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: taskpilot-falkordb
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb-data:/data
+    restart: unless-stopped
+
+  backend:
+    build: .
+    container_name: taskpilot-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - FALKORDB_GRAPH=taskpilot
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - RATE_LIMIT_PER_MIN=10
+      - DAILY_AGENT_CAP=500
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=gemini-2.5-flash
+    depends_on:
+      - falkordb
+    restart: unless-stopped
+
+volumes:
+  falkordb-data:
