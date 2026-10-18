@@ -21,11 +21,11 @@ export const KNOWLEDGE_BASE: FAQItem[] = [
   {
     id: "kb_plans",
     topic: "plans_quotas",
-    keywords: ["price", "pricing", "cost", "plan", "pro", "free", "tier", "subscription", "how much"],
+    keywords: ["price", "pricing", "cost", "plan", "plans", "pro", "free", "tier", "subscription", "how much", "limits"],
     question: "What plans does TaskPilot offer?",
     answer:
-      "TaskPilot offers two tiers:\n\n1. Free Tier (₹0):\n- 10 autonomous agent runs / day\n- 5 LLM reasoning runs / day\n- 50 tasks per workspace\n- 1 workspace\n\n2. Pro Tier (₹999 / 30 days):\n- 500 autonomous agent runs / day\n- 200 LLM reasoning runs / day\n- 200 tasks per workspace\n- 10 isolated workspaces\n- GitHub repository import\n- Priority graph execution",
-    followUpChips: ["How do I upgrade to Pro?", "What happens if I hit my quota?", "Is test mode free?"],
+      "TaskPilot offers Free and Pro plans:\n\n- Free Plan (Current): ₹0. Everyone currently has the Free plan limits (1 workspace, 50 tasks per workspace, 5 AI calls/day, 10 agent runs/day).\n- Pro Plan (Future Development): Planned for future development with expanded limits (10 workspaces, 200 tasks per workspace, 200 AI calls/day, 500 agent runs/day, GitHub import).\n\nPlease note: The Pro plan is planned for future development. There is nothing to buy yet, no payments are collected, no card data is requested, and everyone currently has the Free plan limits.",
+    followUpChips: ["How do I upgrade to Pro?", "What happens if I hit my quota?", "How do workspaces work?"],
     action: {
       label: "View Plans & Usage",
       type: "open_pricing",
@@ -33,14 +33,14 @@ export const KNOWLEDGE_BASE: FAQItem[] = [
   },
   {
     id: "kb_upgrade",
-    topic: "billing",
-    keywords: ["upgrade", "buy", "purchase", "pay", "subscribe", "payment", "razorpay"],
+    topic: "plans_quotas",
+    keywords: ["upgrade", "buy", "purchase", "pay", "subscribe", "payment", "card", "billing"],
     question: "How do I upgrade to Pro?",
     answer:
-      "To upgrade to Pro:\n1. Click your user avatar or the 'Plans & Usage' button.\n2. In the pricing modal, click 'Upgrade to Pro'.\n3. Complete the checkout via Razorpay Test Mode.\n\nNote: If you are currently in a Guest Session, you must first link an email and password to create a permanent account before upgrading.",
-    followUpChips: ["What payment methods are supported?", "How do guest accounts work?"],
+      "The Pro plan is planned for future development. There is nothing to buy yet, no payments are collected, and no card data is requested. Everyone currently has the Free plan limits, and all features are completely free to use right now.",
+    followUpChips: ["What plans does TaskPilot offer?", "What happens if I hit my quota?"],
     action: {
-      label: "Open Upgrade Modal",
+      label: "View Plans",
       type: "open_pricing",
     },
   },
@@ -50,8 +50,8 @@ export const KNOWLEDGE_BASE: FAQItem[] = [
     keywords: ["quota", "limit", "rate limit", "exceeded", "daily", "429", "too many requests"],
     question: "What happens if I hit my daily execution quota?",
     answer:
-      "When your daily quota is exhausted, agent runs return an HTTP 429 status code indicating the daily limit has been reached. Quota counters reset automatically every midnight UTC. Upgrading to Pro increases your limit to 500 daily runs.",
-    followUpChips: ["What plans are available?", "How do I upgrade?"],
+      "When your daily quota is exhausted, agent runs return an HTTP 429 status code indicating the daily limit has been reached. Quota counters reset automatically every midnight UTC. The Pro plan with higher quotas is planned for future development; currently everyone has the Free plan limits.",
+    followUpChips: ["What plans does TaskPilot offer?", "How do workspaces work?"],
     action: {
       label: "Check My Quota Usage",
       type: "open_pricing",

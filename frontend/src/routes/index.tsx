@@ -35,6 +35,7 @@ import {
 import { DependencyGraph } from "@/components/taskpilot/DependencyGraph";
 import { StatusChart, OverdueChart } from "@/components/taskpilot/Charts";
 import { PricingModal } from "@/components/taskpilot/PricingModal";
+import { PlanChip } from "@/components/taskpilot/PlanDisplay";
 import { ChatbotWidget } from "@/chatbot/ChatbotModal";
 import { cn } from "@/lib/utils";
 
@@ -592,17 +593,7 @@ function TaskPilot() {
                 ) : <p className="text-muted-foreground">Nothing needs your attention.</p>}
               </PopoverContent>
             </Popover>
-            {user && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPricingOpen(true)}
-                className="hidden sm:inline-flex h-9 items-center gap-1.5 text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
-              >
-                <Sparkles className="size-3.5 text-indigo-500" />
-                <span>Plans</span>
-              </Button>
-            )}
+            <PlanChip />
             <Button variant="ghost" size="icon" className="size-10" aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setDark((d) => !d)}>
               {dark ? <Sun className="size-[18px]" strokeWidth={1.75} /> : <Moon className="size-[18px]" strokeWidth={1.75} />}
             </Button>
@@ -737,8 +728,6 @@ function TaskPilot() {
               <Link to="/terms" className="hover:underline">Terms</Link>
               <span>•</span>
               <Link to="/privacy" className="hover:underline">Privacy</Link>
-              <span>•</span>
-              <Link to="/refund" className="hover:underline">Refunds</Link>
             </div>
           </footer>
         </main>

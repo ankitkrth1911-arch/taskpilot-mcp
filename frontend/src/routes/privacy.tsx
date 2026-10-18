@@ -45,9 +45,9 @@ function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-foreground">3. Payment Information</h2>
+            <h2 className="text-base font-semibold text-foreground">3. Payment &amp; Financial Information</h2>
             <p className="mt-1">
-              Payment transactions are handled securely by Razorpay. We do not store full credit card numbers, CVVs, or payment credentials on our servers.
+              TaskPilot AI does not collect or process credit card details or payments. Everything is currently free to use, and any paid tiers remain in future development.
             </p>
           </section>
 

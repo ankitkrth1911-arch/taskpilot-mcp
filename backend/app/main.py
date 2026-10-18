@@ -57,9 +57,6 @@ from app.billing import (
     get_plan_details,
     consume_quota,
     get_usage_today,
-    create_razorpay_order,
-    verify_payment_and_activate_subscription,
-    handle_razorpay_webhook,
 )
 
 # Configure logging
@@ -698,18 +695,8 @@ async def admin_cleanup(
 
 
 # ==============================================================================
-# Billing & Quotas Endpoints (Razorpay TEST)
+# Billing & Quotas Endpoints
 # ==============================================================================
-
-class CheckoutPayload(BaseModel):
-    plan: str = Field(default="pro")
-
-
-class VerifyPayload(BaseModel):
-    razorpay_order_id: str
-    razorpay_payment_id: str
-    razorpay_signature: str
-
 
 @app.get("/api/billing/me")
 async def get_my_billing(
@@ -728,59 +715,6 @@ async def get_my_billing(
         "usage": usage,
         "isGuest": current_user.is_anonymous,
     }
-
-
-@app.post("/api/billing/checkout")
-async def checkout(
-    payload: CheckoutPayload,
-    current_user: UserClaims = Depends(get_current_user),
-):
-    """
-    Creates a Razorpay order for subscription upgrade.
-    Guests are blocked (403). Prices come solely from plans table.
-    Never exposes key secret.
-    """
-    if current_user.is_anonymous:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Guests cannot upgrade. Please create an account first.",
-        )
-
-    order_info = await create_razorpay_order(current_user.sub, payload.plan)
-    return order_info
-
-
-@app.post("/api/billing/verify")
-async def verify_payment(
-    payload: VerifyPayload,
-    current_user: UserClaims = Depends(get_current_user),
-):
-    """
-    Verifies Razorpay HMAC signature, verifies payment with Razorpay,
-    and activates or extends subscription. Idempotent.
-    """
-    result = await verify_payment_and_activate_subscription(
-        user_id=current_user.sub,
-        razorpay_order_id=payload.razorpay_order_id,
-        razorpay_payment_id=payload.razorpay_payment_id,
-        razorpay_signature=payload.razorpay_signature,
-    )
-    return result
-
-
-@app.post("/api/billing/webhook")
-async def billing_webhook(
-    request: Request,
-    x_razorpay_signature: Optional[str] = Header(None, alias="X-Razorpay-Signature"),
-):
-    """
-    Razorpay Webhook handler (source of truth).
-    Validates signature on RAW body before parsing, dedupes via webhook_events,
-    and updates payments and subscriptions idempotently.
-    """
-    raw_body = await request.body()
-    result = await handle_razorpay_webhook(raw_body, x_razorpay_signature)
-    return result
 
 
 @app.post("/api/github/import")

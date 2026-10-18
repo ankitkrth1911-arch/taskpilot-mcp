@@ -385,19 +385,18 @@ TaskPilot incorporates enterprise-grade multi-tenancy while keeping the public d
 
 ---
 
-## 14. Plans, Quotas & Razorpay TEST Billing
+## 14. Plans, Quotas & Future Development
 
 - **Subscription Tiers**:
   - **Free Tier (₹0)**: 10 autonomous agent runs / day, 5 LLM reasoning runs / day, 50 tasks / workspace, 1 workspace.
-  - **Pro Tier (₹999 / 30 days)**: 500 agent runs / day, 200 LLM reasoning runs / day, 200 tasks / workspace, 10 workspaces, GitHub repository import enabled.
+  - **Pro Tier (Future Development)**: 500 agent runs / day, 200 LLM reasoning runs / day, 200 tasks / workspace, 10 workspaces, GitHub repository import enabled.
 - **Server-Side Quota Enforcement**:
   - Quotas are enforced server-side before execution via the `consume_quota` PostgreSQL RPC function, returning `429 Too Many Requests` when limits are reached.
-- **Razorpay TEST Gateway Integration**:
-  - Server-side order creation using Razorpay Basic Auth (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`). Secret keys are never returned to clients or logged.
-  - Client-side checkout modal (`https://checkout.razorpay.com/v1/checkout.js`) with prominent **TEST MODE** badges.
-  - Verification endpoint (`POST /api/billing/verify`) validates user ownership, verifies HMAC-SHA256 signature, verifies payment amounts directly with Razorpay, and extends subscriptions idempotently (+30 days).
-  - Webhook endpoint (`POST /api/billing/webhook`) validates raw request body signatures and deduplicates events via the `webhook_events` table before applying mutations.
-  - Comprehensive audit logging via `audit_log` table for all financial and workspace lifecycle events.
+- **Future Development Plan Display**:
+  - Top-right header plan display chip and accessible popover/sheet dynamically fetching active plans from Supabase.
+  - Clear notification: *"Paid plans are planned for future development. Everything is free to use right now."*
+  - No payment gateways or payment credentials collected; all users currently utilize Free tier limits while all features remain free to test.
+  - Comprehensive audit logging via `audit_log` table for workspace lifecycle events.
 
 ---
 
@@ -410,7 +409,7 @@ TaskPilot incorporates enterprise-grade multi-tenancy while keeping the public d
   - Accessible slide-over widget with Esc key support and `aria-live="polite"` screen-reader compliance.
   - Human support fallback: submits tickets to the `support_requests` database table.
 - **Cloudflare Edge Security**:
-  - Cloudflare Pages `_headers` file enforces a strict Content Security Policy (`default-src 'self'`, whitelisted Razorpay and Cloudflare Turnstile origins).
+  - Cloudflare Pages `_headers` file enforces a strict Content Security Policy (`default-src 'self'`, whitelisted Cloudflare Turnstile and Supabase origins).
   - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security`.
 - **Backend Request Hardening**:
   - 64KB request body size cap on all JSON endpoints to mitigate Denial-of-Service attacks.

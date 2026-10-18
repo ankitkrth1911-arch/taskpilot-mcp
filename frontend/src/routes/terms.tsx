@@ -52,9 +52,9 @@ function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-foreground">4. Subscriptions and Billing</h2>
+            <h2 className="text-base font-semibold text-foreground">4. Subscriptions and Plans</h2>
             <p className="mt-1">
-              TaskPilot AI offers Free and Pro subscriptions. Subscription fees are processed through authorized payment partners (such as Razorpay). Test mode transactions do not incur real monetary charges.
+              TaskPilot AI is currently free to use. Paid subscription tiers are planned for future development. No payments or billing information are collected at this time.
             </p>
           </section>
 

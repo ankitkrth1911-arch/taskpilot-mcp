@@ -437,20 +437,6 @@ export type BillingMeResponse = {
   usage_today: UsageToday;
 };
 
-export type CheckoutResponse = {
-  orderId: string;
-  keyId: string;
-  amount: number;
-  currency: string;
-  planName: string;
-};
-
-export type VerifyPaymentInput = {
-  razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
-};
-
 export async function getBillingMe(): Promise<BillingMeResponse> {
   if (IS_DEMO) {
     return {
@@ -484,19 +470,5 @@ export async function getBillingMe(): Promise<BillingMeResponse> {
     };
   }
   return request<BillingMeResponse>("/api/billing/me");
-}
-
-export async function createCheckout(planId = "pro"): Promise<CheckoutResponse> {
-  return request<CheckoutResponse>("/api/billing/checkout", {
-    method: "POST",
-    body: JSON.stringify({ plan_id: planId }),
-  });
-}
-
-export async function verifyPayment(data: VerifyPaymentInput): Promise<{ status: string; message: string; plan?: string }> {
-  return request<{ status: string; message: string; plan?: string }>("/api/billing/verify", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
 }
 

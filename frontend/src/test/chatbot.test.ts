@@ -2,18 +2,37 @@ import { describe, it, expect } from "vitest";
 import { findMatchingAnswer, KNOWLEDGE_BASE } from "../chatbot/kb";
 
 describe("Rule-based Help Chatbot Knowledge Base", () => {
-  it("matches pricing queries accurately", () => {
-    const match = findMatchingAnswer("How much does the Pro plan cost?");
-    expect(match).not.toBeNull();
-    expect(match?.id).toBe("kb_plans");
-    expect(match?.answer).toContain("₹999");
+  it("reaches the updated plans topic from 3 distinct phrasings", () => {
+    const phrasing1 = findMatchingAnswer("How much does the Pro plan cost?");
+    const phrasing2 = findMatchingAnswer("What are the plans and limits?");
+    const phrasing3 = findMatchingAnswer("Tell me about your pricing");
+
+    expect(phrasing1).not.toBeNull();
+    expect(phrasing1?.id).toBe("kb_plans");
+
+    expect(phrasing2).not.toBeNull();
+    expect(phrasing2?.id).toBe("kb_plans");
+
+    expect(phrasing3).not.toBeNull();
+    expect(phrasing3?.id).toBe("kb_plans");
+
+    // All phrasings provide the updated future development policy
+    for (const match of [phrasing1, phrasing2, phrasing3]) {
+      expect(match?.answer).toContain("future development");
+      expect(match?.answer).toContain("nothing to buy");
+      expect(match?.answer).toContain("no payments are collected");
+      expect(match?.answer).toContain("no card data is requested");
+      expect(match?.answer).toContain("Free plan limits");
+    }
   });
 
-  it("matches upgrade queries accurately", () => {
+  it("matches upgrade queries accurately with future development guidance", () => {
     const match = findMatchingAnswer("How do I upgrade to Pro?");
     expect(match).not.toBeNull();
     expect(match?.id).toBe("kb_upgrade");
-    expect(match?.action?.type).toBe("open_pricing");
+    expect(match?.answer).toContain("future development");
+    expect(match?.answer).toContain("nothing to buy");
+    expect(match?.answer).toContain("no payments are collected");
   });
 
   it("matches quota exhaustion queries", () => {
