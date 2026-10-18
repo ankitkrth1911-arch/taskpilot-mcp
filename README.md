@@ -15,7 +15,7 @@
 ## Repository Layout
 
 - **`backend/`**: Python FastAPI backend powered by FalkorDB graph database and FastMCP (Streamable HTTP at `/mcp`). Provides graph traversal tools, impact ranking, escalation chains, and human-in-the-loop approval workflows.
-- **`frontend/`**: Interactive dashboard interface (added next) connecting to the backend via REST and MCP.
+- **`frontend/`**: Interactive React/Vite dashboard connecting to the backend via REST/MCP (run with `cd frontend && npm install && npm run dev`).
 
 ---
 
