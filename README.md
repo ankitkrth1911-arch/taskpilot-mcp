@@ -364,3 +364,74 @@ When recording the 2-3 minute demo for the hackathon submission:
 ## 12. AI Assistant Disclosure
 
 In accordance with hackathon rules, this project was developed with the assistance of an agentic AI coding assistant (Google Antigravity). All architectural patterns, FalkorDB Cypher queries, graph schemas, rate limiting, and verification suites were reviewed, validated, and explained by the author to ensure complete conceptual mastery and code reliability.
+
+---
+
+## 13. Accounts, Multi-Tenancy & Workspace Isolation
+
+TaskPilot incorporates enterprise-grade multi-tenancy while keeping the public demo intact:
+
+- **Supabase Authentication**:
+  - Email/password authentication, registration with password strength indicators, and email confirmation workflows.
+  - Anonymous guest sessions (`is_anonymous=true`) for friction-free exploration.
+  - Frictionless guest upgrading: converts anonymous sessions into permanent email/password accounts with zero data loss.
+- **Row-Level Security & Graph Isolation**:
+  - All workspace operations forward the user's verified Supabase JWT directly to PostgREST with strict PostgreSQL Row-Level Security (RLS).
+  - Every workspace receives a dedicated, isolated property graph in FalkorDB (`workspace_<uuid>`).
+  - Strict graph safeguards: The system-level graph named `"taskpilot"` is permanently protected and refuses all deletion requests.
+  - Task dependency graph creation enforces a **200-task cap** per workspace and prevents circular dependencies using a 3-color Depth-First Search (DFS) cycle detection algorithm.
+- **Zero Breaking Changes for Public Demo**:
+  - Requests without an `Authorization` header automatically target the public demo graph in read-only mode, guaranteeing complete backward compatibility.
+
+---
+
+## 14. Plans, Quotas & Razorpay TEST Billing
+
+- **Subscription Tiers**:
+  - **Free Tier (₹0)**: 10 autonomous agent runs / day, 5 LLM reasoning runs / day, 50 tasks / workspace, 1 workspace.
+  - **Pro Tier (₹999 / 30 days)**: 500 agent runs / day, 200 LLM reasoning runs / day, 200 tasks / workspace, 10 workspaces, GitHub repository import enabled.
+- **Server-Side Quota Enforcement**:
+  - Quotas are enforced server-side before execution via the `consume_quota` PostgreSQL RPC function, returning `429 Too Many Requests` when limits are reached.
+- **Razorpay TEST Gateway Integration**:
+  - Server-side order creation using Razorpay Basic Auth (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`). Secret keys are never returned to clients or logged.
+  - Client-side checkout modal (`https://checkout.razorpay.com/v1/checkout.js`) with prominent **TEST MODE** badges.
+  - Verification endpoint (`POST /api/billing/verify`) validates user ownership, verifies HMAC-SHA256 signature, verifies payment amounts directly with Razorpay, and extends subscriptions idempotently (+30 days).
+  - Webhook endpoint (`POST /api/billing/webhook`) validates raw request body signatures and deduplicates events via the `webhook_events` table before applying mutations.
+  - Comprehensive audit logging via `audit_log` table for all financial and workspace lifecycle events.
+
+---
+
+## 15. Rule-Based Help Assistant & Security Hardening
+
+- **Deterministic Help Chatbot**:
+  - Local rule-based knowledge base (`frontend/src/chatbot/kb.ts`) with typed topics, keyword matching, follow-up chips, and action shortcuts.
+  - **Zero external AI dependencies**: runs entirely in browser memory.
+  - **Strict plain-text rendering**: never uses `dangerouslySetInnerHTML`, `innerHTML`, or `eval()`.
+  - Accessible slide-over widget with Esc key support and `aria-live="polite"` screen-reader compliance.
+  - Human support fallback: submits tickets to the `support_requests` database table.
+- **Cloudflare Edge Security**:
+  - Cloudflare Pages `_headers` file enforces a strict Content Security Policy (`default-src 'self'`, whitelisted Razorpay and Cloudflare Turnstile origins).
+  - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security`.
+- **Backend Request Hardening**:
+  - 64KB request body size cap on all JSON endpoints to mitigate Denial-of-Service attacks.
+  - Strict parameterized openCypher queries preventing Cypher injection.
+  - Secret redaction in all logging and error responses.
+
+---
+
+## 16. Cron & Maintenance Cleanup
+
+To automatically clean up expired guest workspaces and purge stale anonymous accounts older than 7 days, configure a recurring cron job:
+
+```bash
+# Run daily at 03:00 UTC
+0 3 * * * curl -s -X POST https://api.yourdomain.com/api/admin/cleanup \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+The cleanup handler:
+1. Validates the `X-Admin-Token` header.
+2. Identifies workspaces where `expires_at < NOW()`, deletes their associated FalkorDB graphs (verifying the target is not `"taskpilot"`), and removes the workspace rows.
+3. Queries Supabase Auth Admin API and purges anonymous user records older than 7 days.
+4. Records all deletion events in the `audit_log` table.
+

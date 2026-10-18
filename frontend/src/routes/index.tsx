@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import {
   Activity, AlertTriangle, Bell, Bot, Check, CheckCircle2, Database, History, LayoutGrid, Loader2,
   LogIn, LogOut, Menu, Minus, Moon, Search, ShieldCheck, Sparkles, Sun, Terminal, User, UserCheck, X, XCircle, BarChart3,
+  FolderPlus, Plus, Trash2, CreditCard,
 } from "lucide-react";
 import {
   approveActions, daysOverdue, getGraph, getTasks, IS_DEMO, parseTrace, runAgent,
-  type Action, type ApproveResult, type Graph, type Ranked, type Task,
+  createWorkspace, deleteWorkspace, createTask, deleteTask,
+  type Action, type ApproveResult, type Graph, type Ranked, type Task, type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -27,8 +29,13 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { DependencyGraph } from "@/components/taskpilot/DependencyGraph";
 import { StatusChart, OverdueChart } from "@/components/taskpilot/Charts";
+import { PricingModal } from "@/components/taskpilot/PricingModal";
+import { ChatbotWidget } from "@/chatbot/ChatbotModal";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -92,7 +99,20 @@ const toolsOf = (trace: string[]) => [...new Set(trace.map((t) => parseTrace(t)?
 
 /* ---------------- page ---------------- */
 function TaskPilot() {
-  const { user, logout, loginAsGuest } = useAuth();
+  const {
+    user,
+    isGuest,
+    isDemo,
+    loading,
+    currentWorkspace,
+    workspaces,
+    guestBannerDismissed,
+    signOut,
+    upgradeGuest,
+    setCurrentWorkspace,
+    refreshWorkspaces,
+    dismissGuestBanner,
+  } = useAuth();
   const navigate = useNavigate();
   const [s, setS] = useState<State>(initial);
   const patch = useCallback((p: Partial<State> | ((s: State) => Partial<State>)) =>
@@ -103,16 +123,215 @@ function TaskPilot() {
   const [dark, setDark] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
 
+  // Modal states
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeEmail, setUpgradeEmail] = useState("");
+  const [upgradePassword, setUpgradePassword] = useState("");
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+
+  const [deleteWorkspaceOpen, setDeleteWorkspaceOpen] = useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [taskForm, setTaskForm] = useState({
+    name: "",
+    owner: "",
+    ownerEmail: "",
+    manager: "",
+    project: "Core",
+    deadline: "",
+    status: "Not Started",
+    dependsOn: [] as number[],
+  });
+
   useEffect(() => { document.documentElement.classList.toggle("dark", dark); }, [dark]);
 
   useEffect(() => {
+    if (!loading && !user && !isDemo) {
+      navigate({ to: "/login" });
+    }
+  }, [loading, user, isDemo, navigate]);
+
+  const loadData = useCallback(() => {
+    patch((p) => ({
+      sources: {
+        tasks: { ...p.sources.tasks, status: "loading" },
+        graph: { ...p.sources.graph, status: "loading" },
+      },
+    }));
     getTasks()
-      .then((tasks) => patch((p) => ({ tasks, sources: { ...p.sources, tasks: { status: IS_DEMO ? "sample" : "connected", checkedAt: new Date(), count: tasks.length } } })))
-      .catch((e) => patch((p) => ({ tasks: [], error: errMsg(e), sources: { ...p.sources, tasks: { status: "unreachable", checkedAt: new Date() } } })));
+      .then((tasks) =>
+        patch((p) => ({
+          tasks,
+          sources: {
+            ...p.sources,
+            tasks: {
+              status: IS_DEMO || !currentWorkspace ? "sample" : "connected",
+              checkedAt: new Date(),
+              count: tasks.length,
+            },
+          },
+        }))
+      )
+      .catch((e) =>
+        patch((p) => ({
+          tasks: [],
+          error: errMsg(e),
+          sources: { ...p.sources, tasks: { status: "unreachable", checkedAt: new Date() } },
+        }))
+      );
     getGraph()
-      .then((graph) => patch((p) => ({ graph, sources: { ...p.sources, graph: { status: IS_DEMO ? "sample" : "connected", checkedAt: new Date(), count: graph.nodes.length } } })))
-      .catch((e) => patch((p) => ({ graphError: errMsg(e), sources: { ...p.sources, graph: { status: "unreachable", checkedAt: new Date() } } })));
-  }, [patch]);
+      .then((graph) =>
+        patch((p) => ({
+          graph,
+          sources: {
+            ...p.sources,
+            graph: {
+              status: IS_DEMO || !currentWorkspace ? "sample" : "connected",
+              checkedAt: new Date(),
+              count: graph.nodes.length,
+            },
+          },
+        }))
+      )
+      .catch((e) =>
+        patch((p) => ({
+          graphError: errMsg(e),
+          sources: { ...p.sources, graph: { status: "unreachable", checkedAt: new Date() } },
+        }))
+      );
+  }, [patch, currentWorkspace]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleUpgrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!upgradeEmail.trim() || !upgradePassword) {
+      setUpgradeError("Please provide an email and password.");
+      return;
+    }
+    setUpgradeError(null);
+    setUpgrading(true);
+    try {
+      const res = await upgradeGuest(upgradeEmail.trim(), upgradePassword);
+      if (res.success) {
+        toast.success("Account upgraded successfully!", {
+          description: "Your guest session is now a permanent account with preserved workspaces.",
+        });
+        setUpgradeOpen(false);
+        setUpgradeEmail("");
+        setUpgradePassword("");
+      } else {
+        setUpgradeError(res.error || "Failed to upgrade account.");
+      }
+    } catch (err) {
+      setUpgradeError(errMsg(err));
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newWorkspaceName.trim();
+    if (!name) return;
+    setCreatingWorkspace(true);
+    setWorkspaceError(null);
+    try {
+      const newWs = await createWorkspace(name);
+      await refreshWorkspaces();
+      setCurrentWorkspace(newWs);
+      toast.success(`Workspace "${newWs.name}" created`);
+      setNewWorkspaceOpen(false);
+      setNewWorkspaceName("");
+    } catch (err) {
+      setWorkspaceError(errMsg(err));
+    } finally {
+      setCreatingWorkspace(false);
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!currentWorkspace) return;
+    setDeletingWorkspace(true);
+    try {
+      await deleteWorkspace(currentWorkspace.id);
+      toast.success(`Workspace "${currentWorkspace.name}" deleted`);
+      setCurrentWorkspace(null);
+      await refreshWorkspaces();
+      setDeleteWorkspaceOpen(false);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setDeletingWorkspace(false);
+    }
+  };
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!taskForm.name.trim() || !taskForm.owner.trim() || !taskForm.project.trim()) {
+      setTaskError("Name, owner, and project are required.");
+      return;
+    }
+    setCreatingTask(true);
+    setTaskError(null);
+    try {
+      await createTask({
+        name: taskForm.name.trim(),
+        owner: taskForm.owner.trim(),
+        ownerEmail: taskForm.ownerEmail.trim() || undefined,
+        manager: taskForm.manager.trim() || undefined,
+        project: taskForm.project.trim(),
+        deadline: taskForm.deadline || undefined,
+        status: taskForm.status,
+        dependsOn: taskForm.dependsOn.length > 0 ? taskForm.dependsOn : undefined,
+      });
+      toast.success(`Task "${taskForm.name.trim()}" created`);
+      setNewTaskOpen(false);
+      setTaskForm({
+        name: "",
+        owner: "",
+        ownerEmail: "",
+        manager: "",
+        project: "Core",
+        deadline: "",
+        status: "Not Started",
+        dependsOn: [],
+      });
+      loadData();
+    } catch (err) {
+      setTaskError(errMsg(err));
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: number) => {
+    try {
+      await deleteTask(taskId);
+      toast.success("Task deleted");
+      loadData();
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out successfully");
+    navigate({ to: "/login" });
+  };
 
   const doRun = async (raw: string) => {
     const text = raw.trim().slice(0, 500);
@@ -224,6 +443,17 @@ function TaskPilot() {
     </nav>
   );
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading TaskPilot…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-[14px]">
       <aside className="fixed inset-y-0 left-0 hidden w-[232px] flex-col bg-sidebar px-3 py-5 lg:flex">
@@ -231,23 +461,54 @@ function TaskPilot() {
         <div className="mt-6">{nav()}</div>
         <div className="mt-auto border-t border-sidebar-border/60 pt-4">
           {user ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-sidebar-border/60 bg-sidebar-accent/40 p-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-[11px] font-semibold text-sidebar-primary-foreground">
+                    {user.isGuest ? <User className="size-3.5" /> : initials(user.name)}
+                  </div>
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <p className="truncate text-xs font-medium text-sidebar-foreground">{user.name}</p>
+                    <p className="truncate text-[10px] text-sidebar-foreground/60">{user.isGuest ? "Guest" : user.email}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="rounded p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                  title="Sign out"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="size-3.5" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPricingOpen(true)}
+                className="flex w-full items-center justify-between rounded-lg border border-sidebar-border/50 bg-sidebar-accent/20 px-2.5 py-1.5 text-[11px] text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+              >
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Sparkles className="size-3 text-indigo-400" />
+                  Plans &amp; Quotas
+                </span>
+                <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400">
+                  Upgrade
+                </span>
+              </button>
+            </div>
+          ) : isDemo ? (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-sidebar-border/60 bg-sidebar-accent/40 p-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-[11px] font-semibold text-sidebar-primary-foreground">
-                  {user.isGuest ? <User className="size-3.5" /> : initials(user.name)}
-                </div>
-                <div className="min-w-0 flex-1 leading-tight">
-                  <p className="truncate text-xs font-medium text-sidebar-foreground">{user.name}</p>
-                  <p className="truncate text-[10px] text-sidebar-foreground/60">{user.isGuest ? "Guest Mode" : user.role}</p>
-                </div>
+              <div className="min-w-0 flex-1 leading-tight">
+                <p className="truncate text-xs font-medium text-sidebar-foreground">Public Demo</p>
+                <p className="truncate text-[10px] text-sidebar-foreground/60">Read-only mode</p>
               </div>
               <Link
                 to="/login"
-                className="rounded p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                title="Account options / Switch user"
-                aria-label="Account options"
+                className="rounded p-1 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                title="Sign in"
+                aria-label="Sign in"
               >
-                <LogOut className="size-3.5" />
+                <LogIn className="size-3.5" />
               </Link>
             </div>
           ) : (
@@ -266,6 +527,37 @@ function TaskPilot() {
       </aside>
 
       <div className="lg:pl-[232px]">
+        {user?.isGuest && !guestBannerDismissed && (
+          <div className="border-b bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800 dark:text-amber-200">
+            <div className="mx-auto flex max-w-[1080px] items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  <strong>You're a guest.</strong> Create an account to keep your workspace — guest data is deleted after about 7 days.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-amber-500/40 text-xs hover:bg-amber-500/20"
+                  onClick={() => setUpgradeOpen(true)}
+                >
+                  Create an account
+                </Button>
+                <button
+                  type="button"
+                  onClick={dismissGuestBanner}
+                  className="rounded p-1 text-muted-foreground hover:text-foreground"
+                  aria-label="Dismiss guest notice"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="mx-auto flex h-14 max-w-[1080px] items-center gap-2 px-4 sm:px-6">
             <Sheet open={mobileNav} onOpenChange={setMobileNav}>
@@ -300,6 +592,17 @@ function TaskPilot() {
                 ) : <p className="text-muted-foreground">Nothing needs your attention.</p>}
               </PopoverContent>
             </Popover>
+            {user && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPricingOpen(true)}
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+              >
+                <Sparkles className="size-3.5 text-indigo-500" />
+                <span>Plans</span>
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="size-10" aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setDark((d) => !d)}>
               {dark ? <Sun className="size-[18px]" strokeWidth={1.75} /> : <Moon className="size-[18px]" strokeWidth={1.75} />}
             </Button>
@@ -331,32 +634,28 @@ function TaskPilot() {
                           </Badge>
                         ) : (
                           <Badge variant="secondary" className="text-[10px]">
-                            Operator
+                            Account
                           </Badge>
                         )}
                       </div>
-                      <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-                      <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5">{user.role}</p>
+                      <p className="truncate text-xs text-muted-foreground">{user.isGuest ? "Temporary session" : user.email}</p>
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {user.isGuest ? (
-                    <DropdownMenuItem asChild>
-                      <Link to="/login" className="cursor-pointer flex items-center gap-2 text-xs">
-                        <LogIn className="size-3.5" />
-                        <span>Sign in with Email & Password</span>
-                      </Link>
-                    </DropdownMenuItem>
-                  ) : (
+                  <DropdownMenuItem
+                    className="cursor-pointer flex items-center gap-2 text-xs"
+                    onClick={() => setPricingOpen(true)}
+                  >
+                    <CreditCard className="size-3.5 text-indigo-500" />
+                    <span>Plans &amp; Usage</span>
+                  </DropdownMenuItem>
+                  {user.isGuest && (
                     <DropdownMenuItem
                       className="cursor-pointer flex items-center gap-2 text-xs"
-                      onClick={() => {
-                        loginAsGuest();
-                        toast.info("Switched to Guest User mode");
-                      }}
+                      onClick={() => setUpgradeOpen(true)}
                     >
                       <Sparkles className="size-3.5 text-primary" />
-                      <span>Switch to Guest Mode</span>
+                      <span>Upgrade to Permanent Account</span>
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem asChild>
@@ -368,11 +667,7 @@ function TaskPilot() {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="cursor-pointer text-destructive focus:text-destructive flex items-center gap-2 text-xs"
-                    onClick={() => {
-                      logout();
-                      toast.success("Signed out successfully");
-                      navigate({ to: "/login" });
-                    }}
+                    onClick={handleSignOut}
                   >
                     <LogOut className="size-3.5" />
                     <span>Sign Out</span>
@@ -411,14 +706,41 @@ function TaskPilot() {
           )}
 
           <Overview s={s} stats={stats} />
-          <ConnectedData s={s} query={query} />
+          <ConnectedData
+            s={s}
+            query={query}
+            currentWorkspace={currentWorkspace}
+            workspaces={workspaces}
+            onSelectWorkspace={(val) => {
+              if (val === "demo") {
+                setCurrentWorkspace(null);
+              } else {
+                const ws = workspaces.find((w) => w.id === val);
+                if (ws) setCurrentWorkspace(ws);
+              }
+            }}
+            onOpenNewWorkspace={() => setNewWorkspaceOpen(true)}
+            onOpenDeleteWorkspace={() => setDeleteWorkspaceOpen(true)}
+            onOpenNewTask={() => setNewTaskOpen(true)}
+            onDeleteTask={handleDeleteTask}
+            isUserAuthenticated={Boolean(user)}
+          />
           <AgentSection s={s} instruction={instruction} setInstruction={setInstruction} onRun={doRun} />
           <ToolActivity runs={s.runs} />
           <Approvals s={s} patch={patch} onApprove={() => setConfirmOpen(true)} />
           <HistorySection rows={s.history} />
           <Insights s={s} />
 
-          <footer className="border-t pt-6 pb-10 text-xs text-muted-foreground">Reminders are simulated. No real emails are sent.</footer>
+          <footer className="border-t pt-6 pb-10 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-4">
+            <span>Reminders are simulated. No real emails are sent.</span>
+            <div className="flex items-center gap-3">
+              <Link to="/terms" className="hover:underline">Terms</Link>
+              <span>•</span>
+              <Link to="/privacy" className="hover:underline">Privacy</Link>
+              <span>•</span>
+              <Link to="/refund" className="hover:underline">Refunds</Link>
+            </div>
+          </footer>
         </main>
       </div>
 
@@ -434,6 +756,288 @@ function TaskPilot() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Guest Upgrade Dialog */}
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Keep Your Workspace</DialogTitle>
+            <DialogDescription>
+              Link an email and password to convert your guest session into a permanent account.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpgrade} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label htmlFor="upgrade-email" className="text-xs font-medium">Email address</label>
+              <Input
+                id="upgrade-email"
+                type="email"
+                value={upgradeEmail}
+                onChange={(e) => setUpgradeEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                disabled={upgrading}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="upgrade-password" className="text-xs font-medium">Password</label>
+              <Input
+                id="upgrade-password"
+                type="password"
+                value={upgradePassword}
+                onChange={(e) => setUpgradePassword(e.target.value)}
+                placeholder="At least 6 characters"
+                required
+                minLength={6}
+                disabled={upgrading}
+              />
+            </div>
+            {upgradeError && (
+              <p className="text-xs text-destructive">{upgradeError}</p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setUpgradeOpen(false)}
+                disabled={upgrading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={upgrading || !upgradeEmail || !upgradePassword}>
+                {upgrading && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+                Upgrade Account
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Workspace Dialog */}
+      <Dialog open={newWorkspaceOpen} onOpenChange={setNewWorkspaceOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Create Workspace</DialogTitle>
+            <DialogDescription>
+              Workspaces isolate your project tasks and graph data in FalkorDB.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateWorkspace} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label htmlFor="ws-name" className="text-xs font-medium">Workspace Name</label>
+              <Input
+                id="ws-name"
+                value={newWorkspaceName}
+                onChange={(e) => setNewWorkspaceName(e.target.value)}
+                placeholder="e.g. Q4 Sprint, Launch Team"
+                maxLength={50}
+                required
+                disabled={creatingWorkspace}
+              />
+            </div>
+            {workspaceError && (
+              <p className="text-xs text-destructive">{workspaceError}</p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNewWorkspaceOpen(false)}
+                disabled={creatingWorkspace}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingWorkspace || !newWorkspaceName.trim()}>
+                {creatingWorkspace && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Workspace Alert Dialog */}
+      <AlertDialog open={deleteWorkspaceOpen} onOpenChange={setDeleteWorkspaceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete workspace "{currentWorkspace?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this workspace, including all of its tasks and graph data from FalkorDB. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingWorkspace}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteWorkspace}
+              disabled={deletingWorkspace}
+            >
+              {deletingWorkspace && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+              Delete Workspace
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* New Task Dialog */}
+      <Dialog open={newTaskOpen} onOpenChange={setNewTaskOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New Task</DialogTitle>
+            <DialogDescription>
+              Create a task with owners and dependencies in "{currentWorkspace?.name}".
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateTask} className="space-y-3 pt-2">
+            <div className="space-y-1">
+              <label htmlFor="task-name" className="text-xs font-medium">Task Name *</label>
+              <Input
+                id="task-name"
+                value={taskForm.name}
+                onChange={(e) => setTaskForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Finalize security review"
+                required
+                disabled={creatingTask}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label htmlFor="task-owner" className="text-xs font-medium">Owner Name *</label>
+                <Input
+                  id="task-owner"
+                  value={taskForm.owner}
+                  onChange={(e) => setTaskForm((f) => ({ ...f, owner: e.target.value }))}
+                  placeholder="e.g. Alex Chen"
+                  required
+                  disabled={creatingTask}
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="task-email" className="text-xs font-medium">Owner Email</label>
+                <Input
+                  id="task-email"
+                  type="email"
+                  value={taskForm.ownerEmail}
+                  onChange={(e) => setTaskForm((f) => ({ ...f, ownerEmail: e.target.value }))}
+                  placeholder="alex@company.com"
+                  disabled={creatingTask}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label htmlFor="task-project" className="text-xs font-medium">Project *</label>
+                <Input
+                  id="task-project"
+                  value={taskForm.project}
+                  onChange={(e) => setTaskForm((f) => ({ ...f, project: e.target.value }))}
+                  placeholder="Core"
+                  required
+                  disabled={creatingTask}
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="task-manager" className="text-xs font-medium">Manager</label>
+                <Input
+                  id="task-manager"
+                  value={taskForm.manager}
+                  onChange={(e) => setTaskForm((f) => ({ ...f, manager: e.target.value }))}
+                  placeholder="e.g. Sarah"
+                  disabled={creatingTask}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label htmlFor="task-deadline" className="text-xs font-medium">Deadline</label>
+                <Input
+                  id="task-deadline"
+                  type="date"
+                  value={taskForm.deadline}
+                  onChange={(e) => setTaskForm((f) => ({ ...f, deadline: e.target.value }))}
+                  disabled={creatingTask}
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="task-status" className="text-xs font-medium">Status</label>
+                <Select
+                  value={taskForm.status}
+                  onValueChange={(val) => setTaskForm((f) => ({ ...f, status: val }))}
+                >
+                  <SelectTrigger id="task-status" className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Not Started">Not Started</SelectItem>
+                    <SelectItem value="In Progress">In Progress</SelectItem>
+                    <SelectItem value="Blocked">Blocked</SelectItem>
+                    <SelectItem value="Done">Done</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {s.tasks && s.tasks.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Depends on existing tasks (optional)</label>
+                <div className="max-h-24 overflow-y-auto rounded-md border p-2 space-y-1 text-xs">
+                  {s.tasks.map((t) => (
+                    <label key={t.id} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        checked={taskForm.dependsOn.includes(t.id)}
+                        onCheckedChange={(checked) => {
+                          setTaskForm((f) => ({
+                            ...f,
+                            dependsOn: checked
+                              ? [...f.dependsOn, t.id]
+                              : f.dependsOn.filter((id) => id !== t.id),
+                          }));
+                        }}
+                      />
+                      <span className="truncate">#{t.id} {t.name} ({t.owner})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {taskError && (
+              <p className="text-xs text-destructive">{taskError}</p>
+            )}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNewTaskOpen(false)}
+                disabled={creatingTask}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingTask || !taskForm.name.trim() || !taskForm.owner.trim()}>
+                {creatingTask && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+                Save Task
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      {/* Plans & Usage Pricing Modal */}
+      <PricingModal
+        open={pricingOpen}
+        onClose={() => setPricingOpen(false)}
+        onOpenUpgradeGuest={() => setUpgradeOpen(true)}
+      />
+
+      {/* Floating Rule-based Help Assistant */}
+      <ChatbotWidget
+        onOpenPricing={() => setPricingOpen(true)}
+        onOpenNewWorkspace={() => setNewWorkspaceOpen(true)}
+        onOpenNewTask={() => setNewTaskOpen(true)}
+      />
     </div>
   );
 }
@@ -559,7 +1163,29 @@ function Overview({ s, stats }: { s: State; stats: { total: number; done: number
   );
 }
 
-function ConnectedData({ s, query }: { s: State; query: string }) {
+function ConnectedData({
+  s,
+  query,
+  currentWorkspace,
+  workspaces,
+  onSelectWorkspace,
+  onOpenNewWorkspace,
+  onOpenDeleteWorkspace,
+  onOpenNewTask,
+  onDeleteTask,
+  isUserAuthenticated,
+}: {
+  s: State;
+  query: string;
+  currentWorkspace: Workspace | null;
+  workspaces: Workspace[];
+  onSelectWorkspace: (val: string) => void;
+  onOpenNewWorkspace: () => void;
+  onOpenDeleteWorkspace: () => void;
+  onOpenNewTask: () => void;
+  onDeleteTask: (id: number) => void;
+  isUserAuthenticated: boolean;
+}) {
   const [status, setStatus] = useState("all");
   const [owner, setOwner] = useState("all");
   const [deadline, setDeadline] = useState("all");
@@ -622,6 +1248,73 @@ function ConnectedData({ s, query }: { s: State; query: string }) {
         {src("Dependency graph", "/api/graph", s.sources.graph, "nodes")}
       </div>
 
+      {/* Workspace Picker Toolbar */}
+      <div className="panel mt-4 p-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Database className="size-4 text-primary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Workspace:</span>
+          </div>
+          <Select
+            value={currentWorkspace?.id || "demo"}
+            onValueChange={onSelectWorkspace}
+          >
+            <SelectTrigger className="h-9 w-[220px]">
+              <SelectValue placeholder="Select workspace" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="demo">Demo data (read-only)</SelectItem>
+              {workspaces.map((ws) => (
+                <SelectItem key={ws.id} value={ws.id}>
+                  {ws.name}{ws.expires_at ? " (Guest)" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {isUserAuthenticated && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={onOpenNewWorkspace}
+            >
+              <FolderPlus className="size-3.5" />
+              <span>New Workspace</span>
+            </Button>
+          )}
+
+          {currentWorkspace && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5"
+              onClick={onOpenDeleteWorkspace}
+            >
+              <Trash2 className="size-3.5" />
+              <span className="hidden sm:inline">Delete Workspace</span>
+            </Button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {currentWorkspace ? (
+            <Button
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={onOpenNewTask}
+            >
+              <Plus className="size-3.5" />
+              <span>Add Task</span>
+            </Button>
+          ) : (
+            <Badge variant="outline" className="text-xs py-1 px-2.5 text-muted-foreground border-dashed">
+              Public Demo (Read-only)
+            </Badge>
+          )}
+        </div>
+      </div>
+
       <div className="panel mt-4">
         <div className="flex flex-wrap gap-3 border-b px-4 py-3">
           {filter("f-status", "Status", status, setStatus, [["all", "All statuses"], ...statuses.map((x) => [x, x] as [string, string])])}
@@ -633,12 +1326,14 @@ function ConnectedData({ s, query }: { s: State; query: string }) {
           <table className="w-full min-w-[720px] text-left text-[13.5px]">
             <thead className="text-xs text-muted-foreground">
               <tr className="border-b">
-                {["Task", "Owner", "Deadline", "Status", "Recommendation"].map((h) => <th key={h} scope="col" className="px-4 py-2 font-medium">{h}</th>)}
+                {["Task", "Owner", "Deadline", "Status", "Recommendation", ...(currentWorkspace ? ["Actions"] : [])].map((h) => (
+                  <th key={h} scope="col" className={cn("px-4 py-2 font-medium", h === "Actions" && "text-right")}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {s.tasks === null && Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b last:border-0">{Array.from({ length: 5 }).map((__, j) => <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>)}</tr>
+                <tr key={i} className="border-b last:border-0">{Array.from({ length: currentWorkspace ? 6 : 5 }).map((__, j) => <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>)}</tr>
               ))}
               {rows.map((t) => {
                 const od = daysOverdue(t.deadline, t.status);
@@ -661,6 +1356,20 @@ function ConnectedData({ s, query }: { s: State; query: string }) {
                     <td className="px-4 py-2.5 text-muted-foreground">
                       {r ? <span className={cn(r.i === 0 && "font-medium text-foreground")}>{r.i === 0 ? "Chase first" : `Chase #${r.i + 1}`}, blocks {r.blocksCount}</span> : "—"}
                     </td>
+                    {currentWorkspace && (
+                      <td className="px-4 py-2.5 text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          title="Delete task"
+                          aria-label={`Delete task ${t.name}`}
+                          onClick={() => onDeleteTask(t.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

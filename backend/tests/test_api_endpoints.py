@@ -78,3 +78,30 @@ def test_approve_payload_validation():
     # Empty actions array -> 400
     resp3 = client.post("/api/approve", json={"actions": []})
     assert resp3.status_code == 400
+
+
+def test_admin_cleanup_security(monkeypatch):
+    """POST /api/admin/cleanup requires valid X-Admin-Token header."""
+    monkeypatch.setenv("ADMIN_TOKEN", "super-secret-cleanup-token")
+
+    # Missing header -> 401
+    resp_no_token = client.post("/api/admin/cleanup")
+    assert resp_no_token.status_code == 401
+
+    # Wrong header -> 401
+    resp_bad_token = client.post("/api/admin/cleanup", headers={"X-Admin-Token": "wrong-token"})
+    assert resp_bad_token.status_code == 401
+
+    # Valid token -> 200
+    resp_valid = client.post("/api/admin/cleanup", headers={"X-Admin-Token": "super-secret-cleanup-token"})
+    assert resp_valid.status_code == 200
+    assert resp_valid.json()["status"] == "ok"
+
+
+def test_payload_too_large_rejection():
+    """POST request with body exceeding 64KB is rejected with 413 Payload Too Large."""
+    large_payload = {"data": "x" * 70000}
+    resp = client.post("/api/approve", json=large_payload)
+    assert resp.status_code == 413
+    assert "Payload too large" in resp.json()["detail"]
+

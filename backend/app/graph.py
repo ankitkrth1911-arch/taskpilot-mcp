@@ -128,7 +128,7 @@ def find_overdue_tasks(graph, today_utc: str) -> List[Dict[str, Any]]:
     """
     cypher = """
     MATCH (p:Person)-[:OWNS]->(t:Task)-[:IN_PROJECT]->(pr:Project)
-    WHERE t.deadline < $today_utc AND toLower(trim(t.status)) <> 'done'
+    WHERE t.deadline IS NOT NULL AND t.deadline <> '' AND t.deadline < $today_utc AND toLower(trim(t.status)) <> 'done'
     RETURN t.id AS id, t.name AS name, t.deadline AS deadline, t.status AS status,
            t.reminderSent AS reminderSent, t.reminderSentAt AS reminderSentAt,
            p.name AS owner, p.email AS email, pr.name AS project
@@ -203,7 +203,7 @@ def rank_overdue_by_impact(graph, today_utc: str) -> List[Dict[str, Any]]:
     """
     cypher = """
     MATCH (p:Person)-[:OWNS]->(t:Task)-[:IN_PROJECT]->(pr:Project)
-    WHERE t.deadline < $today_utc AND toLower(trim(t.status)) <> 'done'
+    WHERE t.deadline IS NOT NULL AND t.deadline <> '' AND t.deadline < $today_utc AND toLower(trim(t.status)) <> 'done'
     OPTIONAL MATCH (blocked:Task)-[:DEPENDS_ON*1..6]->(t)
     WITH t, p, pr, count(DISTINCT blocked) AS blocks_count
     RETURN t.id AS id, t.name AS name, t.deadline AS deadline, t.status AS status,
@@ -458,5 +458,167 @@ def page_rank_criticality(graph) -> List[Dict[str, Any]]:
 
 
 def clear_graph(graph) -> None:
-    """Cypher: Deletes all nodes and relationships."""
+    """Cypher: Deletes all nodes and relationships. Enforces protection of 'taskpilot' graph."""
+    graph_name = getattr(graph, "name", None) or str(graph)
+    print(f"[SECURITY CHECK] Verifying graph name for clear_graph: '{graph_name}'")
+    if str(graph_name).strip().lower() == "taskpilot":
+        raise ValueError("Safety check failed: protected graph 'taskpilot' cannot be cleared")
+    print(f"[SECURITY CONFIRMED] Target graph '{graph_name}' is NOT 'taskpilot'. Proceeding.")
     graph.query("MATCH (n) DETACH DELETE n")
+
+
+def delete_workspace_graph(graph_name: str) -> None:
+    """Deletes an entire FalkorDB workspace graph. Enforces protection of 'taskpilot' graph."""
+    print(f"[SECURITY CHECK] Verifying graph name for deletion: '{graph_name}'")
+    if str(graph_name).strip().lower() == "taskpilot":
+        raise ValueError("Safety check failed: protected graph 'taskpilot' cannot be deleted")
+    print(f"[SECURITY CONFIRMED] Target graph '{graph_name}' is NOT 'taskpilot'. Deleting.")
+    client = get_client()
+    try:
+        g = client.select_graph(graph_name)
+        g.delete()
+    except Exception as e:
+        print(f"Warning: error deleting graph '{graph_name}': {e}")
+
+
+def create_task(graph, task_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Creates a new task in the workspace graph with:
+    - 200 task cap enforcement
+    - Dependency cycle rejection (DFS cycle detection)
+    - Strict parameterized MERGE for Person, Project, Task, OWNS, IN_PROJECT, WORKED_ON, REPORTS_TO, DEPENDS_ON
+    - Tasks without a deadline are never overdue
+    """
+    from collections import defaultdict
+
+    name = str(task_data.get("name", "")).strip()
+    owner = str(task_data.get("owner", "")).strip()
+    owner_email = str(task_data.get("ownerEmail", "") or "").strip()
+    manager = str(task_data.get("manager", "") or "").strip()
+    project = str(task_data.get("project", "")).strip()
+    deadline = task_data.get("deadline")
+    deadline_str = str(deadline).strip() if deadline else None
+    status = str(task_data.get("status", "Pending") or "Pending").strip()
+    depends_on = task_data.get("dependsOn", [])
+    if not isinstance(depends_on, list):
+        depends_on = []
+
+    # 1. Enforce 200 task cap
+    res_count = graph.query("MATCH (t:Task) RETURN count(t) AS count")
+    current_count = res_count.result_set[0][0] if res_count.result_set else 0
+    if current_count >= 200:
+        raise ValueError("Task limit reached for this workspace (max 200)")
+
+    # 2. Allocate next task ID
+    res_id = graph.query("MATCH (t:Task) RETURN coalesce(max(t.id), 0) + 1 AS next_id")
+    next_id = int(res_id.result_set[0][0]) if res_id.result_set else 1
+
+    # 3. Validate dependency existence and check for cycles
+    if depends_on:
+        # Check that all referenced tasks exist in this graph
+        res_deps = graph.query("MATCH (t:Task) WHERE t.id IN $deps RETURN t.id", {"deps": depends_on})
+        existing_ids = {row[0] for row in res_deps.result_set}
+        for dep_id in depends_on:
+            if dep_id not in existing_ids:
+                raise ValueError(f"Dependency task with ID {dep_id} does not exist in workspace")
+
+        if next_id in depends_on:
+            raise ValueError("Circular dependency detected: task cannot depend on itself")
+
+        # Fetch existing dependencies: (A)-[:DEPENDS_ON]->(B) means A depends on B
+        all_edges_res = graph.query("MATCH (a:Task)-[:DEPENDS_ON]->(b:Task) RETURN a.id, b.id")
+        adj = defaultdict(list)
+        for r in all_edges_res.result_set:
+            adj[r[0]].append(r[1])
+        # Add prospective edges: next_id depends on dep
+        for dep in depends_on:
+            adj[next_id].append(dep)
+
+        # 3-color DFS cycle detection: 0 = unvisited, 1 = visiting, 2 = visited
+        visit_state: Dict[int, int] = {}
+
+        def check_cycle(u: int) -> bool:
+            visit_state[u] = 1
+            for v in adj.get(u, []):
+                if visit_state.get(v, 0) == 1:
+                    return True
+                if visit_state.get(v, 0) == 0:
+                    if check_cycle(v):
+                        return True
+            visit_state[u] = 2
+            return False
+
+        for node in list(adj.keys()):
+            if visit_state.get(node, 0) == 0:
+                if check_cycle(node):
+                    raise ValueError("Circular dependency detected")
+
+    # 4. Parameterized MERGE
+    cypher_merge = """
+    MERGE (p:Person {name: $owner})
+    ON CREATE SET p.email = $owner_email
+    ON MATCH SET p.email = CASE WHEN $owner_email <> '' THEN $owner_email ELSE p.email END
+
+    MERGE (pr:Project {name: $project})
+
+    CREATE (t:Task {
+        id: $task_id,
+        name: $name,
+        deadline: $deadline,
+        status: $status,
+        reminderSent: false,
+        reminderSentAt: null
+    })
+
+    MERGE (p)-[:OWNS]->(t)
+    MERGE (t)-[:IN_PROJECT]->(pr)
+    MERGE (p)-[:WORKED_ON]->(pr)
+    """
+    graph.query(cypher_merge, {
+        "owner": owner,
+        "owner_email": owner_email,
+        "project": project,
+        "task_id": next_id,
+        "name": name,
+        "deadline": deadline_str,
+        "status": status,
+    })
+
+    if manager:
+        cypher_mgr = """
+        MATCH (p:Person {name: $owner})
+        MERGE (m:Person {name: $manager})
+        MERGE (p)-[:REPORTS_TO]->(m)
+        """
+        graph.query(cypher_mgr, {"owner": owner, "manager": manager})
+
+    for dep_id in depends_on:
+        cypher_dep = """
+        MATCH (t:Task {id: $task_id}), (dep:Task {id: $dep_id})
+        MERGE (t)-[:DEPENDS_ON]->(dep)
+        """
+        graph.query(cypher_dep, {"task_id": next_id, "dep_id": dep_id})
+
+    return {
+        "id": next_id,
+        "name": name,
+        "owner": owner,
+        "email": owner_email,
+        "manager": manager,
+        "project": project,
+        "deadline": deadline_str,
+        "status": status,
+        "reminderSent": False,
+        "reminderSentAt": None,
+        "dependsOn": depends_on,
+    }
+
+
+def delete_task(graph, task_id: int) -> bool:
+    """Deletes task by ID and removes attached relationships."""
+    res_check = graph.query("MATCH (t:Task {id: $task_id}) RETURN t.id", {"task_id": task_id})
+    if not res_check.result_set:
+        return False
+    graph.query("MATCH (t:Task {id: $task_id}) DETACH DELETE t", {"task_id": task_id})
+    return True
+
