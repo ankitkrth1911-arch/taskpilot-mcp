@@ -34,10 +34,10 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "TaskPilot AI — approval-gated agent for overdue work" },
-      { name: "description", content: "Finds overdue tasks, ranks them by dependencies, drafts reminders and waits for your approval before acting." },
-      { property: "og:title", content: "TaskPilot AI — approval-gated agent for overdue work" },
-      { property: "og:description", content: "From connected information to real actions. Nothing is sent until you approve." },
+      { title: "TaskPilot AI" },
+      { name: "description", content: "AI agent that finds overdue work, reasons over a project graph, and drafts reminders for your approval." },
+      { property: "og:title", content: "TaskPilot AI" },
+      { property: "og:description", content: "AI agent that finds overdue work, reasons over a project graph, and drafts reminders for your approval." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
